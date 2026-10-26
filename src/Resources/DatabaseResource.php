@@ -4,12 +4,24 @@ declare(strict_types=1);
 
 namespace Liberu\ControlPanel\DatabasesFilament\Resources;
 
+use Filament\Actions\Action;
+use Filament\Actions\DeleteAction;
+use Filament\Forms\Components\KeyValue;
+use Filament\Forms\Components\Select;
+use Filament\Forms\Components\TextInput;
 use Filament\Resources\Resource;
 use Filament\Schemas\Schema;
 use Filament\Tables\Columns\TextColumn;
 use Filament\Tables\Table;
 use Illuminate\Database\Eloquent\Builder;
+use Liberu\ControlPanel\Databases\Actions\ActivateDatabase;
+use Liberu\ControlPanel\Databases\Actions\ArchiveDatabase;
+use Liberu\ControlPanel\Databases\Actions\DeleteDatabase;
+use Liberu\ControlPanel\Databases\Actions\SuspendDatabase;
+use Liberu\ControlPanel\Databases\Enums\DatabaseStatus;
 use Liberu\ControlPanel\Databases\Models\Database;
+use Liberu\ControlPanel\DatabasesFilament\Resources\DatabaseResource\Pages\CreateDatabase;
+use Liberu\ControlPanel\DatabasesFilament\Resources\DatabaseResource\Pages\EditDatabase;
 use Liberu\ControlPanel\DatabasesFilament\Resources\DatabaseResource\Pages\ListDatabases;
 
 final class DatabaseResource extends Resource
@@ -18,11 +30,21 @@ final class DatabaseResource extends Resource
 
     protected static string|\BackedEnum|null $navigationIcon = 'heroicon-o-circle-stack';
 
-    protected static string|\UnitEnum|null $navigationGroup = 'Control Panel';
+    protected static string|\UnitEnum|null $navigationGroup = 'Databases';
 
     public static function form(Schema $schema): Schema
     {
-        return $schema->components([]);
+        return $schema->components([
+            TextInput::make('name')->required()->maxLength(160),
+            Select::make('engine_id')->relationship('engine', 'name', modifyQueryUsing: fn (Builder $query) => $query->where(function (Builder $query): void {
+                $query->whereNull('team_id')->orWhere('team_id', auth()->user()?->current_team_id);
+            }))->required()->searchable()->preload(),
+            TextInput::make('account_id')->maxLength(255),
+            Select::make('status')->options(['provisioning' => 'Provisioning', 'active' => 'Active', 'suspended' => 'Suspended', 'archived' => 'Archived'])->required(),
+            TextInput::make('charset')->default('utf8mb4')->maxLength(40),
+            TextInput::make('collation')->maxLength(80),
+            KeyValue::make('metadata'),
+        ]);
     }
 
     public static function table(Table $table): Table
@@ -33,6 +55,23 @@ final class DatabaseResource extends Resource
             TextColumn::make('status')->badge(),
             TextColumn::make('charset'),
             TextColumn::make('created_at')->dateTime()->sortable(),
+        ])->recordActions([
+            Action::make('activate')
+                ->visible(fn (Database $record): bool => $record->status !== DatabaseStatus::Active && $record->status !== DatabaseStatus::Archived)
+                ->action(fn (Database $record): Database => app(ActivateDatabase::class)->execute($record)),
+            Action::make('suspend')
+                ->requiresConfirmation()
+                ->visible(fn (Database $record): bool => $record->status === DatabaseStatus::Active)
+                ->action(fn (Database $record): Database => app(SuspendDatabase::class)->execute($record)),
+            Action::make('archive')
+                ->requiresConfirmation()
+                ->visible(fn (Database $record): bool => $record->status !== DatabaseStatus::Archived)
+                ->action(fn (Database $record): Database => app(ArchiveDatabase::class)->execute($record)),
+            DeleteAction::make()->action(function (Database $record): void {
+                abort_if(auth()->user()?->current_team_id === null, 403, 'A current team is required.');
+                abort_unless((string) $record->team_id === (string) auth()->user()?->current_team_id, 404);
+                app(DeleteDatabase::class)->execute($record);
+            }),
         ])->defaultSort('created_at', 'desc');
     }
 
@@ -43,6 +82,6 @@ final class DatabaseResource extends Resource
 
     public static function getPages(): array
     {
-        return ['index' => ListDatabases::route('/')];
+        return ['index' => ListDatabases::route('/'), 'create' => CreateDatabase::route('/create'), 'edit' => EditDatabase::route('/{record}/edit')];
     }
 }

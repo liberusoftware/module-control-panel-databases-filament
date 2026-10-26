@@ -1,0 +1,58 @@
+<?php
+
+declare(strict_types=1);
+
+namespace Liberu\ControlPanel\DatabasesFilament\Resources;
+
+use Filament\Forms\Components\KeyValue;
+use Filament\Forms\Components\TextInput;
+use Filament\Forms\Components\Toggle;
+use Filament\Resources\Resource;
+use Filament\Schemas\Schema;
+use Filament\Tables\Columns\TextColumn;
+use Filament\Tables\Table;
+use Illuminate\Database\Eloquent\Builder;
+use Liberu\ControlPanel\Databases\Models\DatabaseEngine;
+use Liberu\ControlPanel\DatabasesFilament\Resources\DatabaseEngineResource\Pages\CreateDatabaseEngine;
+use Liberu\ControlPanel\DatabasesFilament\Resources\DatabaseEngineResource\Pages\EditDatabaseEngine;
+use Liberu\ControlPanel\DatabasesFilament\Resources\DatabaseEngineResource\Pages\ListDatabaseEngines;
+
+final class DatabaseEngineResource extends Resource
+{
+    protected static ?string $model = DatabaseEngine::class;
+
+    protected static string|\BackedEnum|null $navigationIcon = 'heroicon-o-cog-6-tooth';
+
+    protected static string|\UnitEnum|null $navigationGroup = 'Databases';
+
+    public static function form(Schema $schema): Schema
+    {
+        return $schema->components([
+            TextInput::make('name')->required()->maxLength(120),
+            TextInput::make('driver')->required()->maxLength(40),
+            TextInput::make('version')->maxLength(40),
+            TextInput::make('host')->required()->maxLength(255),
+            TextInput::make('port')->numeric()->minValue(1)->maxValue(65535),
+            Toggle::make('active')->default(true),
+            KeyValue::make('metadata'),
+        ]);
+    }
+
+    public static function table(Table $table): Table
+    {
+        return $table->columns([
+            TextColumn::make('name')->searchable()->sortable(), TextColumn::make('driver'),
+            TextColumn::make('version'), TextColumn::make('host'), TextColumn::make('active')->badge(),
+        ])->defaultSort('created_at', 'desc');
+    }
+
+    public static function getEloquentQuery(): Builder
+    {
+        return parent::getEloquentQuery()->where(fn (Builder $query) => $query->where('team_id', auth()->user()?->current_team_id)->orWhereNull('team_id'));
+    }
+
+    public static function getPages(): array
+    {
+        return ['index' => ListDatabaseEngines::route('/'), 'create' => CreateDatabaseEngine::route('/create'), 'edit' => EditDatabaseEngine::route('/{record}/edit')];
+    }
+}
